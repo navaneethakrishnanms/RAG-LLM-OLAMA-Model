@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG with Llama 3</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>RAG Web App with Llama 3 🦙</h1>
+            <p>Upload a PDF or TXT document and start asking questions.</p>
+        </header>
+
+        <div class="upload-section">
+            <h2>1. Upload Your Document</h2>
+            <form id="upload-form">
+                <input type="file" id="file-input" accept=".pdf,.txt" required>
+                <button type="submit">Upload & Process</button>
+            </form>
+            <div id="upload-status" class="status-message"></div>
+        </div>
+        
+        <div class="chat-section" id="chat-container" style="display:none;">
+            <h2>2. Ask a Question</h2>
+            <div id="chat-box">
+                </div>
+            <form id="chat-form">
+                <input type="text" id="question-input" placeholder="Type your question here..." autocomplete="off" required>
+                <button type="submit">Send</button>
+            </form>
+             <div id="loading-indicator" style="display: none;">Thinking... 🤔</div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
