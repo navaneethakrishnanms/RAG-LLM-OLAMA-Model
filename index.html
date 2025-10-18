@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama RAG Chatbot</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-blue': '#1e3a8a', // Darker blue for primary elements
+                        'accent-blue': '#3b82f6',  // Medium blue for accents
+                        'light-blue': '#eff6ff',   // Very light blue background
+                        'chat-bg': '#dbeafe',      // Lighter blue for chat messages
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Inter Font (Tailwind default includes this, but for explicit clarity) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom scrollbar for chat history */
+        #chat-history::-webkit-scrollbar {
+            width: 8px;
+        }
+        #chat-history::-webkit-scrollbar-thumb {
+            background-color: #93c5fd; /* Light blue thumb */
+            border-radius: 4px;
+        }
+        #chat-history::-webkit-scrollbar-track {
+            background: #e0f2fe; /* Very light blue track */
+        }
+
+        /* Drag over effect for file drop zone */
+        .drag-over {
+            border-color: #3b82f6 !important;
+            background-color: #dbeafe !important;
+        }
+
+        /* Responsive layout for the main app */
+        @media (min-width: 1024px) {
+            #main-app-container {
+                grid-template-columns: 1fr 2fr;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans min-h-screen flex items-center justify-center p-4">
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-primary-blue bg-opacity-75 z-50 flex items-center justify-center hidden">
+        <div class="p-6 bg-white rounded-lg shadow-xl flex flex-col items-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-4 border-t-4 border-primary-blue border-t-transparent mb-4"></div>
+            <p id="loading-message" class="text-primary-blue font-semibold">Processing document and building RAG chain...</p>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="w-full max-w-6xl mx-auto rounded-xl shadow-2xl bg-white min-h-[85vh] flex flex-col">
+
+        <!-- Login View -->
+        <div id="login-view" class="p-8 flex-grow flex items-center justify-center">
+            <div class="w-full max-w-md p-6 bg-light-blue rounded-xl shadow-lg border border-accent-blue">
+                <h2 class="text-3xl font-bold text-center text-primary-blue mb-6">RAG Chatbot Login</h2>
+                <form id="login-form">
+                    <div class="mb-4">
+                        <label for="email" class="block text-sm font-medium text-primary-blue">Email</label>
+                        <input type="email" id="email" name="email" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-blue focus:border-accent-blue">
+                    </div>
+                    <div class="mb-6">
+                        <label for="password" class="block text-sm font-medium text-primary-blue">Password</label>
+                        <input type="password" id="password" name="password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-accent-blue focus:border-accent-blue">
+                    </div>
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-blue hover:bg-accent-blue transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-blue">
+                        Sign In (Simulated)
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Main App View -->
+        <div id="main-app-view" class="h-full hidden flex-grow p-4 lg:p-6">
+            <header class="flex justify-between items-center pb-4 border-b border-accent-blue mb-4">
+                <h1 class="text-3xl font-extrabold text-primary-blue">Ollama RAG Chat</h1>
+                <button onclick="logout()" class="text-sm font-semibold text-white bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-md shadow transition duration-200">
+                    Logout
+                </button>
+            </header>
+
+            <div id="main-app-container" class="grid lg:grid-cols-3 gap-6 h-[calc(85vh-90px)]">
+
+                <!-- Left Panel: File Management -->
+                <div class="bg-light-blue p-4 rounded-xl shadow-inner flex flex-col h-full lg:col-span-1">
+                    <h3 class="text-xl font-semibold text-primary-blue mb-4 border-b pb-2 border-accent-blue">Knowledge Base (PDFs)</h3>
+
+                    <!-- Drag & Drop Zone -->
+                    <div id="drop-zone" class="border-2 border-dashed border-accent-blue p-6 rounded-lg text-center cursor-pointer hover:border-primary-blue hover:bg-chat-bg transition duration-200 mb-4">
+                        <p class="text-primary-blue font-medium">Drag & Drop PDF here</p>
+                        <p class="text-xs text-gray-500 mt-1">or click to select file (Max 1MB)</p>
+                        <input type="file" id="file-input" accept=".pdf" class="hidden">
+                    </div>
+
+                    <!-- File List -->
+                    <div class="flex-grow overflow-y-auto space-y-2">
+                        <p id="file-list-status" class="text-gray-500 text-sm italic">Loading files...</p>
+                        <ul id="file-list" class="space-y-2">
+                            <!-- Files will be dynamically inserted here -->
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Chat Interface -->
+                <div class="bg-white p-4 rounded-xl shadow-lg border border-accent-blue flex flex-col h-full lg:col-span-2">
+                    <h3 class="text-xl font-semibold text-primary-blue mb-4 border-b pb-2 border-accent-blue">Chat with Llama 3</h3>
+
+                    <!-- Chat History -->
+                    <div id="chat-history" class="flex-grow overflow-y-auto p-3 space-y-4 mb-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <!-- Chat messages will be appended here -->
+                        <div class="flex justify-start">
+                            <div class="bg-chat-bg p-3 rounded-xl rounded-tl-none shadow text-primary-blue max-w-xs md:max-w-md">
+                                <p>Hello! Upload a PDF document using the panel on the left to start asking questions about its content. Make sure Ollama is running!</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Input Form -->
+                    <form id="chat-form" class="flex items-center">
+                        <input type="text" id="user-input" placeholder="Ask a question about your documents..." 
+                               class="flex-grow px-4 py-3 border border-gray-300 rounded-l-lg shadow-sm focus:outline-none focus:ring-accent-blue focus:border-accent-blue disabled:bg-gray-100" 
+                               required disabled>
+                        <button type="submit" id="send-button"
+                                class="bg-primary-blue text-white px-6 py-3 rounded-r-lg font-semibold hover:bg-accent-blue transition duration-200 shadow disabled:bg-gray-400"
+                                disabled>
+                            Send
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin;
+
+        // --- DOM Elements ---
+        const loginView = document.getElementById('login-view');
+        const mainAppView = document.getElementById('main-app-view');
+        const loginForm = document.getElementById('login-form');
+        const chatForm = document.getElementById('chat-form');
+        const chatHistory = document.getElementById('chat-history');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const fileInput = document.getElementById('file-input');
+        const dropZone = document.getElementById('drop-zone');
+        const fileList = document.getElementById('file-list');
+        const fileListStatus = document.getElementById('file-list-status');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingMessage = document.getElementById('loading-message');
+
+        let isRAGReady = false;
+
+        // --- Utility Functions ---
+        function showLoading(message) {
+            loadingMessage.textContent = message;
+            loadingOverlay.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            loadingOverlay.classList.add('hidden');
+        }
+
+        function showNotification(message, isError = false) {
+            // Simple non-modal notification (replace with a custom modal if needed)
+            console.log(isError ? `[ERROR] ${message}` : `[INFO] ${message}`);
+            
+            const notif = document.createElement('div');
+            notif.textContent = isError ? `Error: ${message}` : message;
+            notif.className = `fixed bottom-4 right-4 p-4 rounded-lg shadow-xl text-white ${isError ? 'bg-red-500' : 'bg-green-500'} z-50 transition-opacity duration-300`;
+            document.body.appendChild(notif);
+            
+            setTimeout(() => {
+                notif.style.opacity = '0';
+                setTimeout(() => notif.remove(), 300);
+            }, 5000);
+        }
+
+        function setChatState(ready) {
+            isRAGReady = ready;
+            userInput.disabled = !ready;
+            sendButton.disabled = !ready;
+            userInput.placeholder = ready 
+                ? "Ask a question about your documents..." 
+                : "Upload a PDF to start chatting...";
+        }
+
+        // --- Authentication (Simulated) ---
+        function checkLogin() {
+            if (localStorage.getItem('isLoggedIn') === 'true') {
+                loginView.classList.add('hidden');
+                mainAppView.classList.remove('hidden');
+                fetchFiles();
+            } else {
+                loginView.classList.remove('hidden');
+                mainAppView.classList.add('hidden');
+            }
+        }
+
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            // In a real app, this would involve API calls and token storage
+            localStorage.setItem('isLoggedIn', 'true');
+            showNotification('Login successful. Welcome back!');
+            checkLogin();
+        });
+
+        function logout() {
+            localStorage.removeItem('isLoggedIn');
+            showNotification('Logged out successfully.');
+            setChatState(false);
+            chatHistory.innerHTML = '';
+            checkLogin();
+        }
+
+        // --- File Management ---
+
+        async function fetchFiles() {
+            fileList.innerHTML = '';
+            fileListStatus.textContent = "Fetching file list...";
+            try {
+                const response = await fetch(`${API_URL}/files`);
+                const data = await response.json();
+
+                if (data.files && data.files.length > 0) {
+                    fileListStatus.classList.add('hidden');
+                    data.files.forEach(renderFileItem);
+                    // Assume RAG is ready if files exist, though the backend will confirm
+                    setChatState(true); 
+                } else {
+                    fileListStatus.classList.remove('hidden');
+                    fileListStatus.textContent = "No documents uploaded yet.";
+                    setChatState(false);
+                }
+            } catch (error) {
+                console.error("Error fetching files:", error);
+                fileListStatus.textContent = "Failed to load files from server.";
+                setChatState(false);
+            }
+        }
+
+        function renderFileItem(filename) {
+            const li = document.createElement('li');
+            li.className = 'flex items-center justify-between p-2 bg-white rounded-md shadow-sm border border-gray-200';
+            li.innerHTML = `
+                <span class="text-sm font-medium text-gray-700 truncate">${filename}</span>
+                <button data-filename="${filename}" class="delete-file-btn ml-2 p-1 text-red-500 hover:text-red-700 rounded-full transition duration-150" aria-label="Delete file ${filename}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+            `;
+            fileList.appendChild(li);
+        }
+
+        // Event listener for delete button (delegated)
+        fileList.addEventListener('click', async (e) => {
+            if (e.target.closest('.delete-file-btn')) {
+                const button = e.target.closest('.delete-file-btn');
+                const filename = button.dataset.filename;
+                await deleteFile(filename);
+            }
+        });
+
+        async function deleteFile(filename) {
+            // Note: Using confirm() is typically avoided in production canvas, but kept here for simplicity
+            if (!confirm(`Are you sure you want to delete ${filename}? This will rebuild the knowledge base.`)) {
+                return;
+            }
+
+            showLoading(`Deleting ${filename} and rebuilding knowledge base...`);
+            setChatState(false);
+
+            try {
+                const response = await fetch(`${API_URL}/files/${filename}`, {
+                    method: 'DELETE',
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showNotification(data.message);
+                    await fetchFiles(); // Refresh list and chat state
+                } else {
+                    showNotification(data.error || 'Unknown error during deletion.', true);
+                }
+            } catch (error) {
+                showNotification("Failed to connect to server for deletion.", true);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // --- Drag & Drop and Upload ---
+
+        // Highlight drop zone on drag over
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.add('drag-over');
+            });
+        });
+
+        // Unhighlight drop zone on drag leave/drop
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('drag-over');
+            });
+        });
+
+        // Handle file drop
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const files = e.dataTransfer.files;
+            if (files.length) {
+                handleFile(files[0]);
+            }
+        });
+
+        // Handle file click selection
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        async function handleFile(file) {
+            if (file.type !== 'application/pdf') {
+                return showNotification('Only PDF files are supported.', true);
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            showLoading(`Uploading ${file.name} and building RAG chain...`);
+            setChatState(false);
+            
+            try {
+                const response = await fetch(`${API_URL}/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showNotification(data.message);
+                    await fetchFiles(); // Refresh file list
+                    setChatState(true);
+                } else {
+                    const errorMessage = data.error || 'File upload failed due to unknown server issue.';
+                    // CRITICAL DEBUGGING STEP: Log the server's specific error response
+                    console.error("Server Upload Error:", response.status, data);
+                    showNotification(errorMessage, true);
+                }
+            } catch (error) {
+                console.error("Connectivity Error:", error);
+                showNotification("Failed to connect to server or upload file. Check your `app.py` console for details.", true);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // --- Chat Functionality ---
+
+        function appendMessage(sender, text) {
+            const messageContainer = document.createElement('div');
+            messageContainer.className = `flex ${sender === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            const messageBubble = document.createElement('div');
+            messageBubble.className = `p-3 rounded-xl shadow max-w-xs md:max-w-md ${
+                sender === 'user' 
+                ? 'bg-accent-blue text-white rounded-br-none' 
+                : 'bg-chat-bg text-primary-blue rounded-tl-none'
+            }`;
+            messageBubble.innerHTML = sender === 'ai' ? formatResponse(text) : `<p>${text}</p>`;
+            
+            messageContainer.appendChild(messageBubble);
+            chatHistory.appendChild(messageContainer);
+            
+            // Scroll to bottom
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+        
+        // Simple markdown-like formatting for better display of AI text
+        function formatResponse(text) {
+            let html = text;
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // Bold
+            html = html.replace(/\n/g, '<br>'); // Newlines
+            return html;
+        }
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const question = userInput.value.trim();
+            if (!question || !isRAGReady) return;
+
+            // 1. Display user message
+            appendMessage('user', question);
+            userInput.value = '';
+            
+            // Disable input while waiting for AI
+            setChatState(false);
+            userInput.placeholder = "Waiting for Llama 3 response...";
+
+            try {
+                // 2. API Call to /ask
+                const response = await fetch(`${API_URL}/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question })
+                });
+
+                const data = await response.json();
+
+                // 3. Display AI message
+                if (response.ok) {
+                    appendMessage('ai', data.answer);
+                } else {
+                    // Log error from server
+                    console.error("Chat Server Error:", response.status, data);
+                    appendMessage('ai', `[Error: The LLM failed to respond] ${data.error}. Check your backend console.`);
+                }
+                
+            } catch (error) {
+                console.error("Fetch Error:", error);
+                appendMessage('ai', "Sorry, I couldn't connect to the server (check if app.py is running and Ollama is active).");
+            } finally {
+                // Re-enable input
+                setChatState(true);
+            }
+        });
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            checkLogin();
+        });
+    </script>
+</body>
+</html>
